@@ -1,7 +1,9 @@
 // NPP Digital Twin — NPPAD accident diagnosis (Task E) — BETTER-RESULTS build.
-// Standalone, offline. Diagnosis: the TaskE_NPPAD (4) package's 1D CNN,
-// probabilities averaged over seeds 0/1/2, one prediction per evaluated
-// window (W = 30/60/120/300/600 s) — window snapshots, not per-step scores.
+// Standalone, offline. Diagnosis: the TaskE_NPPAD (4) package's four
+// classifiers — logistic regression, logistic regression +, 1D CNN and GRU
+// (panel switcher; CNN/GRU probabilities averaged over seeds 0/1/2) — one
+// prediction per evaluated window (W = 30/60/120/300/600 s), shown as
+// window snapshots, not per-step scores.
 // Default setting: onset-aligned windows (t0 = 100 s), realistic
 // instrumentation. Scene data: the same 12 held-out test runs, t = 0..700 s.
 import * as THREE from 'three';
@@ -17,15 +19,24 @@ const S = {
   frame: 0, playing: true, speed: 1, scrubbing: false,
   reveal: false, chartSel: [], lastShownSec: -1, toastShown: false,
   setting: 't0100_realistic', // active package setting (key in manifest.settings)
+  model: 'CNN', // active diagnosis model (key in manifest.models)
   bases: {}, // per-channel pre-onset baseline of the loaded run
 };
 
-/* Diagnosis: the package's 1D CNN (seed-averaged probabilities), reported
-   once per evaluated window W. A snapshot for window W becomes available at
-   t = t0 + W and stays on the panel until the next window completes. */
+/* Diagnosis: the package's four classifiers, reported once per evaluated
+   window W. A snapshot for window W becomes available at t = t0 + W and
+   stays on the panel until the next window completes. CNN probabilities
+   live in run.diag (the original bake); the other models in run.diagModels. */
 const WINDOWS = [30, 60, 120, 300, 600];
 function settingMeta() {
   return S.manifest ? S.manifest.settings[S.setting] : null;
+}
+function modelMeta() {
+  return S.manifest ? S.manifest.models[S.model] : null;
+}
+function diagTable(setting) {
+  if (!S.run) return null;
+  return S.model === 'CNN' ? S.run.diag[setting] : S.run.diagModels[S.model][setting];
 }
 function currentSnapshot() {
   if (!S.run || !S.manifest) return null;
@@ -33,7 +44,7 @@ function currentSnapshot() {
   const t0 = settingMeta().t0;
   let best = null;
   for (const W of WINDOWS) if (t0 + W <= t) best = W;
-  return best ? { W: best, row: S.run.diag[S.setting][String(best)] } : null;
+  return best ? { W: best, row: diagTable(S.setting)[String(best)] } : null;
 }
 /* ---------------- data ---------------- */
 async function loadManifest() {
@@ -337,7 +348,7 @@ function updateDiagnosis() {
       const e0 = meta.t0 + WINDOWS[0];
       $('diagIdle').innerHTML =
         'Collecting the first diagnosis window.<br>' +
-        `The CNN reports one diagnosis per window — the W = 30 s snapshot ` +
+        `The ${modelMeta().label} reports one diagnosis per window — the W = 30 s snapshot ` +
         `completes at t = ${e0} s (window ${meta.t0}–${e0} s).`;
     }
     $('hudW').textContent = 'W = —';
@@ -354,9 +365,10 @@ function updateDiagnosis() {
       rowEl.querySelector('.bar-val').textContent = (p * 100).toFixed(0) + '%';
     });
     $('hudW').textContent = `W = ${W} s`;
+    const mm = modelMeta();
     $('snapNote').textContent =
-      `Snapshot W = ${W} s · window ${meta.t0}–${meta.t0 + W} s · CNN probabilities ` +
-      'averaged over seeds 0/1/2 · top-3 of 12 accident classes. ' +
+      `Snapshot W = ${W} s · window ${meta.t0}–${meta.t0 + W} s · ${mm.label} — ${mm.note} · ` +
+      'top-3 of 12 accident classes. ' +
       'The panel updates at the evaluated windows only (W = 30/60/120/300/600 s).';
     const pred = S.manifest.classes[order[0][1]];
     if (S.reveal) {
@@ -380,10 +392,30 @@ function setSetting(key) {
   if (sel) sel.value = key;
   const meta = S.manifest.settings[key];
   $('settingLabel').textContent = meta.label;
-  $('f1Line').textContent = 'Test macro-F1, CNN (mean ± sd over seeds 0/1/2 in the ' +
-    'package report): ' + WINDOWS.map(W => `W=${W} ${meta.f1[String(W)].toFixed(3)}`).join(' · ');
+  const mm = modelMeta();
+  $('f1Line').textContent = `Test macro-F1, ${mm.label} (package report, ` +
+    'results/macroF1_vs_W.csv): ' +
+    WINDOWS.map(W => `W=${W} ${mm.f1[key][String(W)].toFixed(3)}`).join(' · ');
   updateDiagnosis();
   drawChart();
+}
+function setModel(key) {
+  if (!S.manifest || !S.manifest.models[key]) return;
+  S.model = key;
+  const sel = $('modelSel');
+  if (sel) sel.value = key;
+  $('modelTag').textContent = modelMeta().tag;
+  setSetting(S.setting);
+}
+function buildModels() {
+  const sel = $('modelSel');
+  sel.innerHTML = '';
+  for (const key of S.manifest.model_order) {
+    const o = document.createElement('option');
+    o.value = key; o.textContent = S.manifest.models[key].label;
+    sel.appendChild(o);
+  }
+  setModel(S.manifest.default_model);
 }
 function buildSettings() {
   const sel = $('settingSel');
@@ -503,6 +535,7 @@ $('revealToggle').onchange = e => {
   updateDiagnosis();
 };
 $('settingSel').onchange = e => setSetting(e.target.value);
+$('modelSel').onchange = e => setModel(e.target.value);
 function updateAll(force = false) {
   if (!S.run) return;
   updatePlant(performance.now());
@@ -575,6 +608,7 @@ window.__NPP_DT__ = {
       run: S.run ? S.run.class : null,
       frame: S.frame, t: Math.round(S.frame) * 10,
       setting: S.setting,
+      model: S.model,
       W: snap ? snap.W : null,
       probaSum: row ? row.reduce((a, b) => a + b, 0) : null,
       top1: row ? S.manifest.classes[row.indexOf(Math.max(...row))] : null,
@@ -585,6 +619,7 @@ window.__NPP_DT__ = {
   },
   setFrame: f => { S.frame = f; updateAll(true); },
   setSetting,
+  setModel,
   loadRun,
   ready: () => !!S.run,
   renderInfo: () => ({ calls: renderer.info.render.calls,
@@ -611,6 +646,7 @@ window.__NPP_DT__ = {
 (async () => {
   await loadManifest();
   buildRunBar();
+  buildModels();
   buildSettings();
   await loadRun(S.manifest.runs[0].id);
   resize();

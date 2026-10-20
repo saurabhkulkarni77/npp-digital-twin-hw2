@@ -12,11 +12,16 @@ aligns the diagnosis windows to the plant's real response onset.
 - The package's 12 held-out **test** runs (one per accident class, median
   severity — the same runs its prediction files score), played on the 3D
   plant with channel traces, playback/scrub, and truth reveal.
-- **Diagnosis = the package's 1D CNN**, probabilities averaged over seeds
-  0/1/2, taken verbatim from the package's saved outputs
-  (`results/probs/*.npz`, cross-checked against its
-  `outputs/pred_E_CNN_*_W60_test.csv` files — 48/48 run×setting checks pass).
-- The CNN reports **one prediction per evaluated window**
+- **Diagnosis = the package's four classifiers**, switchable in the panel
+  (CNN is the default): Logistic regression (starter baseline),
+  Logistic regression + (log10-compressed features, tuned C), the 1D CNN and
+  the GRU. Probabilities are taken verbatim from the package's saved outputs
+  (`results/probs/*.npz`; CNN/GRU averaged over seeds 0/1/2) and cross-checked
+  against its `outputs/pred_E_*_W60_test.csv` files — 192/192
+  run×setting×model checks pass. (The package contains no random forest:
+  Homework E2 offers logistic regression *or* random forest, and the package
+  took the logistic-regression branch.)
+- Each model reports **one prediction per evaluated window**
   (W = 30/60/120/300/600 s), so the panel shows **window snapshots**: the
   W snapshot appears at t = t0 + W and stays until the next window completes.
   Nothing is interpolated between windows.
@@ -36,8 +41,8 @@ W ≤ 60 s window is one of only four distinct inputs, so no model can beat the
 0.189 information ceiling — the package's central finding, reproduced here by
 construction.
 
-This twin serves **only what the package contains**: no other models, no
-conformal sets, no explainability add-ons.
+This twin serves **only what the package contains**: its four Homework-2
+classifiers, no other models, no conformal sets, no explainability add-ons.
 
 ## Deployment
 

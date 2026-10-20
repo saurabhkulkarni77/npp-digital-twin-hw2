@@ -41,19 +41,25 @@
   <aside id="sidePanel">
     <div class="panel">
       <h2>Diagnosis <span class="model-tag" id="modelTag">1D CNN &middot; 3-seed average</span></h2>
+      <label class="setting-label">Model
+        <select id="modelSel"></select>
+      </label>
       <label class="setting-label">Setting
         <select id="settingSel"></select>
       </label>
       <p class="model-note" id="settingLabel"></p>
       <p class="model-note" id="f1Line"></p>
-      <p class="model-note">Diagnosis: this package's 1D CNN, probabilities averaged
-        over seeds 0/1/2 &mdash; one prediction per evaluated window
-        (W = 30/60/120/300/600 s), shown as snapshots. The default setting aligns
-        windows to the real onset (t0 = 100 s: in the data the plant responds only
-        from &asymp;110 s). The handout settings (t0 = 20 s) sit at the information
-        ceiling (macro-F1 0.189) for W &le; 60 s. Main prediction file of the
-        package (seed-averaged probabilities, t0 = 100 s, realistic, W = 60 s):
-        macro-F1 0.972.</p>
+      <p class="model-note">Diagnosis: all four classifiers of this package,
+        switchable above &mdash; Logistic regression (the starter baseline),
+        Logistic regression + (log10-compressed features, tuned C), the 1D CNN
+        and the GRU (CNN/GRU probabilities averaged over seeds 0/1/2). Each
+        reports one prediction per evaluated window (W = 30/60/120/300/600 s),
+        shown as snapshots. The default setting aligns windows to the real
+        onset (t0 = 100 s: in the data the plant responds only from
+        &asymp;110 s). The handout settings (t0 = 20 s) sit at the information
+        ceiling (macro-F1 0.189) for W &le; 60 s for every model. Main
+        prediction file of the package (CNN, seed-averaged probabilities,
+        t0 = 100 s, realistic, W = 60 s): macro-F1 0.972.</p>
       <div id="diagBody">
         <div id="diagIdle" class="diag-idle">Collecting the first diagnosis window.</div>
         <div id="diagBars" class="hidden">
@@ -114,11 +120,12 @@
 </section>
 
 <footer>
-  <p>Diagnosis: the <strong>TaskE_NPPAD (better-results) package's</strong> 1D CNN &mdash;
-     the package whose report aligns the diagnosis windows to the plant's real
+  <p>Diagnosis: the <strong>TaskE_NPPAD (better-results) package's</strong> own four
+     classifiers &mdash; logistic regression, logistic regression +, 1D CNN and GRU
+     &mdash; the package whose report aligns the diagnosis windows to the plant's real
      response onset (t0 = 100 s) after showing that handout windows (t0 = 20 s)
      cannot beat macro-F1 0.189 at W &le; 60 s. Probabilities are the package's own
-     saved seed-averaged CNN outputs (seeds 0/1/2); the twin adds nothing of its
+     saved outputs (CNN/GRU averaged over seeds 0/1/2); the twin adds nothing of its
      own &mdash; no other models, no conformal sets. Runs shown are held-out
      <strong>test</strong> runs, one per accident class (median severity), the same
      runs the package's prediction files score. Fully offline: no external requests.</p>
