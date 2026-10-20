@@ -34,9 +34,18 @@ function settingMeta() {
 function modelMeta() {
   return S.manifest ? S.manifest.models[S.model] : null;
 }
+function modelHasData(key) {
+  if (!S.run) return false;
+  return key === 'CNN' ? !!S.run.diag : !!(S.run.diagModels && S.run.diagModels[key]);
+}
 function diagTable(setting) {
   if (!S.run) return null;
-  return S.model === 'CNN' ? S.run.diag[setting] : S.run.diagModels[S.model][setting];
+  if (S.model === 'CNN') return S.run.diag[setting];
+  // Never throw on a run file that predates the model switcher (no
+  // diagModels — e.g. a stale cached copy): fall back to the CNN table,
+  // which every bake carries, so the panel keeps rendering.
+  const dm = S.run.diagModels && S.run.diagModels[S.model];
+  return dm && dm[setting] ? dm[setting] : S.run.diag[setting];
 }
 function currentSnapshot() {
   if (!S.run || !S.manifest) return null;
@@ -47,14 +56,30 @@ function currentSnapshot() {
   return best ? { W: best, row: diagTable(S.setting)[String(best)] } : null;
 }
 /* ---------------- data ---------------- */
+async function fetchJSON(url, forceFresh = false) {
+  // The manifest and the run files are version-coupled (the switcher code
+  // expects run.diagModels next to manifest.models), and this site is
+  // served with no Cache-Control headers, so a returning visitor's browser
+  // can hand back a stale half of that pair from cache. 'no-cache' makes
+  // the browser revalidate before using a cached copy (S3 sends ETag /
+  // Last-Modified, so revalidation is a cheap 304); 'reload' bypasses the
+  // cache entirely for the one-time self-heal in loadRun.
+  const r = await fetch(url, { cache: forceFresh ? 'reload' : 'no-cache' });
+  return r.json();
+}
 async function loadManifest() {
-  const r = await fetch('data/manifest.json');
-  S.manifest = await r.json();
+  S.manifest = await fetchJSON('data/manifest.json');
 }
 async function loadRun(id) {
   const meta = S.manifest.runs.find(r => r.id === id);
-  const r = await fetch('data/' + meta.data);
-  S.run = await r.json();
+  S.run = await fetchJSON('data/' + meta.data);
+  if (S.manifest.model_order && S.manifest.model_order.some(k => !modelHasData(k))) {
+    // A model the manifest advertises has no data in this run file: it is
+    // a pre-switcher copy (no diagModels). Force one fresh download past
+    // any cache; syncModelOptions then disables whatever is still absent
+    // instead of letting the panel throw on switch.
+    S.run = await fetchJSON('data/' + meta.data, true);
+  }
   S.runMeta = meta;
   S.bases = {};
   for (const code of Object.keys(S.run.channels)) {
@@ -66,6 +91,7 @@ async function loadRun(id) {
     ch.classList.toggle('active', ch.dataset.id === id));
   $('hudRun').textContent = `${S.run.class} · ${S.run.file} · sev ${S.run.severity}`;
   buildChips();
+  syncModelOptions();
   S.lastShownSec = -1;
   updateAll(true);
 }
@@ -346,9 +372,10 @@ function updateDiagnosis() {
     $('diagBars').classList.add('hidden');
     if (S.run && meta) {
       const e0 = meta.t0 + WINDOWS[0];
+      const mm = modelMeta();
       $('diagIdle').innerHTML =
         'Collecting the first diagnosis window.<br>' +
-        `The ${modelMeta().label} reports one diagnosis per window — the W = 30 s snapshot ` +
+        `The ${mm ? mm.label : 'model'} reports one diagnosis per window — the W = 30 s snapshot ` +
         `completes at t = ${e0} s (window ${meta.t0}–${e0} s).`;
     }
     $('hudW').textContent = 'W = —';
@@ -367,7 +394,7 @@ function updateDiagnosis() {
     $('hudW').textContent = `W = ${W} s`;
     const mm = modelMeta();
     $('snapNote').textContent =
-      `Snapshot W = ${W} s · window ${meta.t0}–${meta.t0 + W} s · ${mm.label} — ${mm.note} · ` +
+      `Snapshot W = ${W} s · window ${meta.t0}–${meta.t0 + W} s · ${mm ? `${mm.label} — ${mm.note}` : S.model} · ` +
       'top-3 of 12 accident classes. ' +
       'The panel updates at the evaluated windows only (W = 30/60/120/300/600 s).';
     const pred = S.manifest.classes[order[0][1]];
@@ -393,9 +420,11 @@ function setSetting(key) {
   const meta = S.manifest.settings[key];
   $('settingLabel').textContent = meta.label;
   const mm = modelMeta();
-  $('f1Line').textContent = `Test macro-F1, ${mm.label} (package report, ` +
-    'results/macroF1_vs_W.csv): ' +
-    WINDOWS.map(W => `W=${W} ${mm.f1[key][String(W)].toFixed(3)}`).join(' · ');
+  if (mm && mm.f1 && mm.f1[key]) {
+    $('f1Line').textContent = `Test macro-F1, ${mm.label} (package report, ` +
+      'results/macroF1_vs_W.csv): ' +
+      WINDOWS.map(W => `W=${W} ${mm.f1[key][String(W)].toFixed(3)}`).join(' · ');
+  }
   updateDiagnosis();
   drawChart();
 }
@@ -407,9 +436,20 @@ function setModel(key) {
   $('modelTag').textContent = modelMeta().tag;
   setSetting(S.setting);
 }
+function syncModelOptions() {
+  // Disable switcher entries the loaded run file carries no data for
+  // (only possible with a stale pre-switcher run file; with current data
+  // every model is present and this is a no-op). If the active model lost
+  // its data, fall back to CNN, whose table every bake carries.
+  const sel = $('modelSel');
+  if (!sel || !S.run) return;
+  for (const o of sel.options) o.disabled = !modelHasData(o.value);
+  if (!modelHasData(S.model)) setModel('CNN');
+}
 function buildModels() {
   const sel = $('modelSel');
   sel.innerHTML = '';
+  if (!S.manifest.models || !S.manifest.model_order) return; // pre-switcher manifest
   for (const key of S.manifest.model_order) {
     const o = document.createElement('option');
     o.value = key; o.textContent = S.manifest.models[key].label;
